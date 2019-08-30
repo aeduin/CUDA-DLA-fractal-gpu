@@ -1,0 +1,9 @@
+[package]
+name = "rust-visualiser"
+version = "0.1.0"
+authors = ["aeduin <aeduin@nanquanu.org>"]
+edition = "2018"
+
+[dependencies]
+byteorder = "1"
+image = "0.22.1"
