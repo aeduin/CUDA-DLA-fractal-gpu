@@ -1,8 +1,9 @@
 #include <iostream>
 #include <math.h>
 #include <fstream>
+#define CIRCLE_BORDER 1000
 
-// #define RANDOM_WALK
+#define RANDOM_WALK
 
 typedef struct {
     float x;
@@ -20,9 +21,9 @@ typedef struct {
 const float radius = 2.0f;
 const int ceil_radius = (int)radius + ((((float)(int)radius) < radius) ? 1 : 0);
 const float max_speed = 3.0f;
-const int particle_count = 4096 * 8;
+const int particle_count = 4096 * 2;
 
-const int grid_size = 1024 * 8;
+const int grid_size = 1024 * 2;
 const int grid_width = grid_size;
 const int grid_height = grid_size;
 
@@ -33,11 +34,14 @@ __device__ int border_left;
 __device__ int border_right;
 __device__ int border_top;
 __device__ int border_bottom;
+__device__ int smallest_distance_to_center;
+__device__ float debug = -1.0;
 
 void VecAdd();
 void simulate();
 void tick(Particle* particles, int tick_count);
 __device__ int random_int(int min, int max, uint seed);
+__device__ void make_static(Particle* particle, int tick_count, float modulo_x, float modulo_y);
 
 #define print(message) std::cout << message << std::endl
 
@@ -66,11 +70,15 @@ __global__ void init_grid_negative() {
 
 // sets the center of the grid to 0
 __global__ void init_grid_center() {
-    grid[grid_height / 2][grid_width / 2] = 0;
     border_top = grid_height / 2;
     border_bottom = grid_height / 2;
     border_left = grid_width / 2;
     border_right = grid_width / 2;
+    smallest_distance_to_center = CIRCLE_BORDER * CIRCLE_BORDER;
+
+    if(CIRCLE_BORDER < 0) {
+        grid[grid_height / 2][grid_width / 2] = 0;
+    }
 }
 
 // outputs the grid (and its widht/height) to a file
@@ -151,13 +159,20 @@ __device__ void randomize_particle(Particle* particle) {
     int center_width = border_right - border_left;
     int center_height = border_bottom - border_top;
 
-    particle->x = random_int(0, grid_width - center_width, seed + 0);
-    particle->y = random_int(0, grid_height - center_height, seed + 1);
-    if(particle->x > border_left) {
-        particle->x += center_width;
+    if(CIRCLE_BORDER < 0) {
+        particle->x = random_int(0, grid_width - center_width, seed + 0);
+        particle->y = random_int(0, grid_height - center_height, seed + 1);
+
+        if(particle->x > border_left) {
+            particle->x += center_width;
+        }
+        if(particle->y > border_top) {
+            particle->y += center_height;
+        }
     }
-    if(particle->y > border_top) {
-        particle->y += center_height;
+    else {
+        particle->x = grid_width / 2;
+        particle->y = grid_height / 2;
     }
 
     randomize_speed(particle, seed + 2, seed + 3);
@@ -210,17 +225,25 @@ void simulate() {
         tick(particles, ++tick_count);
 
       
-        int left, right, top, bottom;
+        int left, right, top, bottom, center_distance;
+        float debug_copy;
 
         cudaMemcpyFromSymbol(&left, border_left, sizeof(int));
         cudaMemcpyFromSymbol(&right, border_right, sizeof(int));
         cudaMemcpyFromSymbol(&top, border_top, sizeof(int));
         cudaMemcpyFromSymbol(&bottom, border_bottom, sizeof(int));
+        cudaMemcpyFromSymbol(&bottom, border_bottom, sizeof(int));
+        cudaMemcpyFromSymbol(&center_distance, smallest_distance_to_center, sizeof(int));
+        cudaMemcpyFromSymbol(&debug_copy, debug, sizeof(float));
 
         if(i % 100 == 0) {
-            print(left << ", " << right << ", " << top << ", " << bottom);
+            print(left << ", " << right << ", " << top << ", " << bottom << ", " << center_distance);
+            print(debug_copy);
         }
         const int margin = 50;
+        if(CIRCLE_BORDER > -1 && center_distance < margin) {
+            break;
+        }
         if(left < margin || right > grid_width - margin || top < margin || bottom > grid_height - margin) {
             break;
         }
@@ -229,6 +252,14 @@ void simulate() {
     output_grid();
 
     cudaFree(particles);
+}
+
+__device__ float pythagoras(float a, float b) {
+    return a * a + b * b;
+}
+
+__device__ float pythagoras(Particle* particle) {
+    return pythagoras(particle->x - (float)(grid_width / 2), particle->y - (float)(grid_height / 2));
 }
 
 __global__ void particle_step(Particle* particles, int tick_count) {
@@ -272,6 +303,11 @@ __global__ void particle_step(Particle* particles, int tick_count) {
     float modulo_y = fmod(particle->y, 1.0f);
     bool looping = true;
 
+    if(CIRCLE_BORDER > -1 && (int)(pythagoras(particle) + radius) >= CIRCLE_BORDER * CIRCLE_BORDER) {
+        make_static(particle, tick_count, modulo_x, modulo_y);
+        return;
+    }
+
     for(int dx = -ceil_radius; dx <= ceil_radius && looping; dx++) {
         for(int dy = -ceil_radius; dy <= ceil_radius && looping; dy++) {
             // calculate distance from center of the particle
@@ -282,40 +318,7 @@ __global__ void particle_step(Particle* particles, int tick_count) {
                 // position is within radius of the center
                 if(grid[(int)(particle->y - distance_y)][(int)(particle->x - distance_x)] >= 0) {
                     // hit another particle
-
-                    for(int dx2 = -ceil_radius; dx2 <= ceil_radius; dx2++) {
-                        for(int dy2 = -ceil_radius; dy2 <= ceil_radius; dy2++) {
-                            // calculate distance from center of the particle
-                            float distance_x2 = -dx2 + modulo_x;
-                            float distance_y2 = -dy2 + modulo_y;
-                
-                            if(distance_x2 * distance_x2 + distance_y2 * distance_y2 < radius * radius) {
-                                // calculate position in grid
-                                int absolute_x = (int)(particle->x - distance_x2);
-                                int absolute_y = (int)(particle->y - distance_y2);
-                    
-                                // if the absolute_x/y are within the grid
-                                if(absolute_x >= 0 && absolute_x < grid_width && absolute_y >= 0 && absolute_y < grid_height) {
-                                    // set the grid to being hit
-                                    grid[absolute_y][absolute_x] = tick_count;
-
-                                    /*
-                                        Because the program writes and reads from the same grid in a single tick,
-                                        the algorithm isn't completely deterministic. I could use two different 
-                                        grids and then copy values, but it doesn't feel necessary.
-                                    */
-                                }
-                            }
-                        }
-                    }
-                    
-                    atomicMin(&border_left, (int)(particle->x - radius));
-                    atomicMax(&border_right, (int)(particle->x + radius));
-                    atomicMin(&border_top, (int)(particle->y - radius));
-                    atomicMax(&border_bottom, (int)(particle->y + radius));
-                    
-                    // give the particle a random new position and speed
-                    randomize_particle(particle);
+                    make_static(particle, tick_count, modulo_x, modulo_y);
 
                     looping = false;
                     break;
@@ -324,6 +327,49 @@ __global__ void particle_step(Particle* particles, int tick_count) {
             
         }
     }
+}
+
+__device__ void make_static(Particle* particle, int tick_count, float modulo_x, float modulo_y) {
+    debug = sqrt(pythagoras(particle) - radius);
+
+    for(int dx2 = -ceil_radius; dx2 <= ceil_radius; dx2++) {
+        for(int dy2 = -ceil_radius; dy2 <= ceil_radius; dy2++) {
+            // calculate distance from center of the particle
+            float distance_x2 = -dx2 + modulo_x;
+            float distance_y2 = -dy2 + modulo_y;
+
+            if(distance_x2 * distance_x2 + distance_y2 * distance_y2 < radius * radius) {
+                // calculate position in grid
+                int absolute_x = (int)(particle->x - distance_x2);
+                int absolute_y = (int)(particle->y - distance_y2);
+    
+                // if the absolute_x/y are within the grid
+                if(absolute_x >= 0 && absolute_x < grid_width && absolute_y >= 0 && absolute_y < grid_height) {
+                    // set the grid to being hit
+                    grid[absolute_y][absolute_x] = tick_count;
+
+                    /*
+                        Because the program writes and reads from the same grid in a single tick,
+                        the algorithm isn't completely deterministic. I could use two different 
+                        grids and then copy values, but it doesn't feel necessary.
+                    */
+                }
+            }
+        }
+    }
+
+    if(CIRCLE_BORDER < 0) {
+        atomicMin(&border_left, (int)(particle->x - radius));
+        atomicMax(&border_right, (int)(particle->x + radius));
+        atomicMin(&border_top, (int)(particle->y - radius));
+        atomicMax(&border_bottom, (int)(particle->y + radius));
+    }
+    else {
+        atomicMin(&smallest_distance_to_center, (int)(pythagoras(particle) - radius));
+    }
+    
+    // give the particle a random new position and speed
+    randomize_particle(particle);
 }
 
 // perform one tick
