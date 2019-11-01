@@ -1,9 +1,9 @@
 #include <iostream>
 #include <math.h>
 #include <fstream>
-#define CIRCLE_BORDER 1000
+#define CIRCLE_BORDER 1000 * 1
 
-#define RANDOM_WALK
+// #define RANDOM_WALK
 
 typedef struct {
     float x;
@@ -21,11 +21,13 @@ typedef struct {
 const float radius = 2.0f;
 const int ceil_radius = (int)radius + ((((float)(int)radius) < radius) ? 1 : 0);
 const float max_speed = 3.0f;
-const int particle_count = 4096 * 2;
+const int particle_count = 4096 * 1;
 
 const int grid_size = 1024 * 2;
 const int grid_width = grid_size;
 const int grid_height = grid_size;
+
+using ullong = unsigned long long;
 
 __device__ int grid[grid_height][grid_width];
 __constant__ Veci2D* circle_indices;
@@ -36,6 +38,9 @@ __device__ int border_top;
 __device__ int border_bottom;
 __device__ int smallest_distance_to_center;
 __device__ float debug = -1.0;
+__device__ ullong total_static_particles;
+__device__ ullong weight_center_x;
+__device__ ullong weight_center_y;
 
 void VecAdd();
 void simulate();
@@ -79,6 +84,13 @@ __global__ void init_grid_center() {
     if(CIRCLE_BORDER < 0) {
         grid[grid_height / 2][grid_width / 2] = 0;
     }
+    else {
+        // init weight center
+        int center_bias = 10;
+        total_static_particles = center_bias;
+        weight_center_x = (grid_width / 2) * center_bias;
+        weight_center_y = (grid_height / 2) * center_bias;
+    }
 }
 
 // outputs the grid (and its widht/height) to a file
@@ -121,7 +133,7 @@ void output_grid() {
 }
 
 __device__ uint hash(uint x) {
-    const uint seed = 1324567967 + 2;
+    const uint seed = 1324567967;
     x += seed;
     x = ((x >> 16) ^ x) * seed;
     x = ((x >> 16) ^ x) * seed;
@@ -146,7 +158,7 @@ __device__ float random_float(uint seed) {
 }
 
 __device__ void randomize_speed(Particle* particle, int direction_seed, int speed_seed) {
-    float direction = M_PI * 2.0f * random_float(direction_seed);
+    float direction = M_PI * 2000.0f * random_float(direction_seed);
     float speed = random_float(speed_seed) * max_speed;
 
     particle->vertical_speed = cosf(direction) * speed;
@@ -171,8 +183,11 @@ __device__ void randomize_particle(Particle* particle) {
         }
     }
     else {
-        particle->x = grid_width / 2;
-        particle->y = grid_height / 2;
+        particle->x = (float) (grid_width - (weight_center_x / total_static_particles));
+        particle->y = (float) (grid_height - (weight_center_y / total_static_particles));
+        // particle->x = grid_width / 2;
+        // particle->y = grid_height / 2;
+        debug = (int) particle->x;
     }
 
     randomize_speed(particle, seed + 2, seed + 3);
@@ -227,6 +242,7 @@ void simulate() {
       
         int left, right, top, bottom, center_distance;
         float debug_copy;
+        ullong total_static_particles_copy;
 
         cudaMemcpyFromSymbol(&left, border_left, sizeof(int));
         cudaMemcpyFromSymbol(&right, border_right, sizeof(int));
@@ -235,13 +251,15 @@ void simulate() {
         cudaMemcpyFromSymbol(&bottom, border_bottom, sizeof(int));
         cudaMemcpyFromSymbol(&center_distance, smallest_distance_to_center, sizeof(int));
         cudaMemcpyFromSymbol(&debug_copy, debug, sizeof(float));
+        cudaMemcpyFromSymbol(&total_static_particles_copy, total_static_particles, sizeof(ullong));
 
-        if(i % 100 == 0) {
+        if(i % 10000 == 0) {
             print(left << ", " << right << ", " << top << ", " << bottom << ", " << center_distance);
             print(debug_copy);
+            print(total_static_particles_copy);
         }
-        const int margin = 50;
-        if(CIRCLE_BORDER > -1 && center_distance < margin) {
+        const int margin = 300;
+        if(CIRCLE_BORDER > -1 && center_distance < margin * margin) {
             break;
         }
         if(left < margin || right > grid_width - margin || top < margin || bottom > grid_height - margin) {
@@ -330,7 +348,7 @@ __global__ void particle_step(Particle* particles, int tick_count) {
 }
 
 __device__ void make_static(Particle* particle, int tick_count, float modulo_x, float modulo_y) {
-    debug = sqrt(pythagoras(particle) - radius);
+    // debug = sqrt(pythagoras(particle) - radius);
 
     for(int dx2 = -ceil_radius; dx2 <= ceil_radius; dx2++) {
         for(int dy2 = -ceil_radius; dy2 <= ceil_radius; dy2++) {
@@ -366,6 +384,9 @@ __device__ void make_static(Particle* particle, int tick_count, float modulo_x, 
     }
     else {
         atomicMin(&smallest_distance_to_center, (int)(pythagoras(particle) - radius));
+        atomicAdd(&total_static_particles, 1l);
+        atomicAdd(&weight_center_x, (ullong)particle->x);
+        atomicAdd(&weight_center_y, (ullong)particle->y);
     }
     
     // give the particle a random new position and speed
@@ -374,7 +395,7 @@ __device__ void make_static(Particle* particle, int tick_count, float modulo_x, 
 
 // perform one tick
 void tick(Particle* particles, int tick_count) {
-    const int threads_per_block = 32;
+    const int threads_per_block = 16;
     const int blocks = particle_count / threads_per_block;
 
     particle_step<<<blocks, threads_per_block>>>(particles, tick_count);
