@@ -185,14 +185,17 @@ __device__ Particle randomize_particle(Particle particle) {
     int center_height = border_bottom - border_top;
 
     if(CIRCLE_BORDER < 0) {
-        particle.x = random_int(0, grid_width - center_width, seed + 0);
-        particle.y = random_int(0, grid_height - center_height, seed + 1);
+        particle.x = random_int(0, grid_width, seed + 0);
 
-        if(particle.x > border_left) {
-            particle.x += center_width;
+        if(particle.x > border_left && particle.x < border_right) {
+            particle.y = random_int(0, grid_height - center_height, seed + 1);
+
+            if(particle.y > border_top) {
+                particle.y += center_height;
+            }
         }
-        if(particle.y > border_top) {
-            particle.y += center_height;
+        else {
+            particle.y = random_int(0, grid_height, seed + 1);
         }
     }
     else {
