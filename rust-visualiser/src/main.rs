@@ -53,7 +53,7 @@ fn save_as_image(grid_values: &[i32], grid_width: u32, grid_height: u32, reduced
         }
         else {
             // map tick_id to rgb
-            let quotient = 1000_000;
+            let quotient = 100_000;
             let base = tick_id + quotient / 10_000;
             let r = map_u8(base * 2633 / quotient);
             let g = map_u8(base * 4783 / quotient);
