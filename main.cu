@@ -3,7 +3,7 @@
 #include <fstream>
 #define CIRCLE_BORDER 1000 * 1
 
-// #define RANDOM_WALK
+#define RANDOM_WALK
 
 typedef struct {
     float x;
@@ -46,7 +46,7 @@ void VecAdd();
 void simulate();
 void tick(Particle* particles, int tick_count);
 __device__ int random_int(int min, int max, uint seed);
-__device__ void make_static(Particle* particle, int tick_count, float modulo_x, float modulo_y);
+__device__ void make_static(Particle particle, int tick_count, float modulo_x, float modulo_y);
 
 #define print(message) std::cout << message << std::endl
 
@@ -61,7 +61,14 @@ int main() {
 void cuda_error() {
     auto result = cudaGetLastError();
     if (result != cudaSuccess) {
-        std::cout << "error: " << result << std::endl;
+        do {
+            std::cout << "error: " << result << std::endl;
+            std::cout << "error message: " << cudaGetErrorString(result) << std::endl;
+
+            result = cudaGetLastError();
+            break;
+        }
+        while(result != cudaSuccess);
     }
     else {
         std::cout << "success" << std::endl;
@@ -166,33 +173,35 @@ __device__ void randomize_speed(Particle* particle, int direction_seed, int spee
 }
 
 // randomizes all fields of the particle
-__device__ void randomize_particle(Particle* particle) {
-    uint seed = particle->seed;
+__device__ Particle randomize_particle(Particle* particle) {
+    uint seed = particle.seed;
     int center_width = border_right - border_left;
     int center_height = border_bottom - border_top;
 
     if(CIRCLE_BORDER < 0) {
-        particle->x = random_int(0, grid_width - center_width, seed + 0);
-        particle->y = random_int(0, grid_height - center_height, seed + 1);
+        particle.x = random_int(0, grid_width - center_width, seed + 0);
+        particle.y = random_int(0, grid_height - center_height, seed + 1);
 
-        if(particle->x > border_left) {
-            particle->x += center_width;
+        if(particle.x > border_left) {
+            particle.x += center_width;
         }
-        if(particle->y > border_top) {
-            particle->y += center_height;
+        if(particle.y > border_top) {
+            particle.y += center_height;
         }
     }
     else {
-        particle->x = (float) (grid_width - (weight_center_x / total_static_particles));
-        particle->y = (float) (grid_height - (weight_center_y / total_static_particles));
-        // particle->x = grid_width / 2;
-        // particle->y = grid_height / 2;
-        debug = (int) particle->x;
+        particle.x = (float) (grid_width - (weight_center_x / total_static_particles));
+        particle.y = (float) (grid_height - (weight_center_y / total_static_particles));
+        // particle.x = grid_width / 2;
+        // particle.y = grid_height / 2;
+        debug = (int) particle.x;
     }
 
     randomize_speed(particle, seed + 2, seed + 3);
 
-    particle->seed = hash(seed);
+    particle.seed = hash(seed);
+
+    return particle;
 }
 
 // initializes the particle
@@ -200,7 +209,7 @@ __global__ void init_particles(Particle* particles) {
     int i = threadIdx.x + blockIdx.x * blockDim.x; // particle index in the particles array
     Particle* particle = particles + i;
     particle->seed = (uint)i * 4;
-    randomize_particle(particle);
+    *particle = randomize_particle(*particle);
 }
 
 // prints border_left, border_right, border_top and border_bottom to stdio
@@ -216,6 +225,9 @@ void print_boundaries() {
 
 void simulate() {
     // initialize grid
+
+    cuda_error();
+
     dim3 threadsPerBlock(16, 16);
     dim3 blocks(grid_width / threadsPerBlock.x, grid_height / threadsPerBlock.y);
     init_grid_negative<<<blocks, threadsPerBlock>>>();
@@ -282,48 +294,54 @@ __device__ float pythagoras(Particle* particle) {
 
 __global__ void particle_step(Particle* particles, int tick_count) {
     int i = blockIdx.x * blockDim.x + threadIdx.x; // particle index in the particles array
-    Particle* particle = particles + i;
+    Particle* particle = particles[i];
     
     #ifdef RANDOM_WALK
     // randomize direction and speed
-    randomize_speed(particle, particle->seed, particle->seed + 1);
-    particle->seed = hash(particle->seed);
+    randomize_speed(particle, particle.seed, particle.seed + 1);
+    particle.seed = hash(particle.seed);
     #endif
 
     // move particle
-    particle->x += particle->horizontal_speed;
-    particle->y += particle->vertical_speed;
+    particle.x += particle.horizontal_speed;
+    particle.y += particle.vertical_speed;
 
     // check bounds
-    if(particle->x - radius <= 0.0f) {
-        particle->x = 0.01f + radius;
-        particle->horizontal_speed *= -1.0f;
+    if(particle.x - radius <= 0.0f) {
+        particle.x = 0.01f + radius;
+        particle.horizontal_speed *= -1.0f;
     }
-    else if(particle->x + radius >= grid_width) {
-        particle->x = grid_width - 0.01f - radius;
-        particle->horizontal_speed *= -1.0f;
+    else if(particle.x + radius >= grid_width) {
+        particle.x = grid_width - 0.01f - radius;
+        particle.horizontal_speed *= -1.0f;
     }
-    if(particle->y - radius <= 0.0f) {
-        particle->y = 0.01f + radius ;
-        particle->vertical_speed *= -1.0f;
+    if(particle.y - radius <= 0.0f) {
+        particle.y = 0.01f + radius ;
+        particle.vertical_speed *= -1.0f;
     }
-    else if(particle->y + radius >= grid_height) {
-        particle->y = grid_height - 0.01f - radius;
-        particle->vertical_speed *= -1.0f;
+    else if(particle.y + radius >= grid_height) {
+        particle.y = grid_height - 0.01f - radius;
+        particle.vertical_speed *= -1.0f;
     }
 
     // calculate some variable values to be used later
     const int diameter = ceil_radius * 2;
 
-    int left = (int)(particle->x - radius);
-    int top = (int)(particle->y - radius);
-    float modulo_x = fmod(particle->x, 1.0f);
-    float modulo_y = fmod(particle->y, 1.0f);
+    float modulo_x = fmod(particle.x, 1.0f);
+    float modulo_y = fmod(particle.y, 1.0f);
     bool looping = true;
 
     if(CIRCLE_BORDER > -1 && (int)(pythagoras(particle) + radius) >= CIRCLE_BORDER * CIRCLE_BORDER) {
-        make_static(particle, tick_count, modulo_x, modulo_y);
+        particles[i] = make_static(particle, tick_count, modulo_x, modulo_y);
         return;
+    }
+
+    const int max_steps = 100;
+    bool outside_border_margins = true;
+    const int border_margins = 50;
+
+    for(int i = 0; i < max_steps && outside_border_margins) {
+        outside_border_margins = particle.x < (border_left - border_margins) && particle.x > (border_right + border_margins) && particle.y > (border_bottom + border_margins) && particle.y < (border_top - border_margins);
     }
 
     for(int dx = -ceil_radius; dx <= ceil_radius && looping; dx++) {
@@ -334,9 +352,9 @@ __global__ void particle_step(Particle* particles, int tick_count) {
 
             if(distance_x * distance_x + distance_y * distance_y < radius * radius) {
                 // position is within radius of the center
-                if(grid[(int)(particle->y - distance_y)][(int)(particle->x - distance_x)] >= 0) {
+                if(grid[(int)(particle.y - distance_y)][(int)(particle.x - distance_x)] >= 0) {
                     // hit another particle
-                    make_static(particle, tick_count, modulo_x, modulo_y);
+                    particles[i] = make_static(particle, tick_count, modulo_x, modulo_y);
 
                     looping = false;
                     break;
@@ -347,7 +365,7 @@ __global__ void particle_step(Particle* particles, int tick_count) {
     }
 }
 
-__device__ void make_static(Particle* particle, int tick_count, float modulo_x, float modulo_y) {
+__device__ void make_static(Particle particle, int tick_count, float modulo_x, float modulo_y) {
     // debug = sqrt(pythagoras(particle) - radius);
 
     for(int dx2 = -ceil_radius; dx2 <= ceil_radius; dx2++) {
@@ -358,8 +376,8 @@ __device__ void make_static(Particle* particle, int tick_count, float modulo_x, 
 
             if(distance_x2 * distance_x2 + distance_y2 * distance_y2 < radius * radius) {
                 // calculate position in grid
-                int absolute_x = (int)(particle->x - distance_x2);
-                int absolute_y = (int)(particle->y - distance_y2);
+                int absolute_x = (int)(particle.x - distance_x2);
+                int absolute_y = (int)(particle.y - distance_y2);
     
                 // if the absolute_x/y are within the grid
                 if(absolute_x >= 0 && absolute_x < grid_width && absolute_y >= 0 && absolute_y < grid_height) {
@@ -377,20 +395,20 @@ __device__ void make_static(Particle* particle, int tick_count, float modulo_x, 
     }
 
     if(CIRCLE_BORDER < 0) {
-        atomicMin(&border_left, (int)(particle->x - radius));
-        atomicMax(&border_right, (int)(particle->x + radius));
-        atomicMin(&border_top, (int)(particle->y - radius));
-        atomicMax(&border_bottom, (int)(particle->y + radius));
+        atomicMin(&border_left, (int)(particle.x - radius));
+        atomicMax(&border_right, (int)(particle.x + radius));
+        atomicMin(&border_top, (int)(particle.y - radius));
+        atomicMax(&border_bottom, (int)(particle.y + radius));
     }
     else {
         atomicMin(&smallest_distance_to_center, (int)(pythagoras(particle) - radius));
         atomicAdd(&total_static_particles, 1l);
-        atomicAdd(&weight_center_x, (ullong)particle->x);
-        atomicAdd(&weight_center_y, (ullong)particle->y);
+        atomicAdd(&weight_center_x, (ullong)particle.x);
+        atomicAdd(&weight_center_y, (ullong)particle.y);
     }
     
     // give the particle a random new position and speed
-    randomize_particle(particle);
+    return randomize_particle(particle);
 }
 
 // perform one tick
