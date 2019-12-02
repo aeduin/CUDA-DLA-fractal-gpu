@@ -87,7 +87,7 @@ fn max(val1: i32, val2: i32) -> i32 {
 fn map_u8(val: i64) -> u8 {
     let modulo = val % 511;
     
-    if modulo >= 255 {
+    if modulo >= 256 {
         (511 - modulo) as u8
     }
     else {
