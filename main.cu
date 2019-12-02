@@ -22,9 +22,9 @@ typedef struct {
 const float radius = 2.0f;
 const int ceil_radius = (int)radius + ((((float)(int)radius) < radius) ? 1 : 0);
 const float max_speed = 3.0f;
-const int particle_count = 4096 * 8;
+const int particle_count = 4096 * 16;
 
-const int grid_size = 1024 * 2;
+const int grid_size = 1024 * 16;
 const int grid_width = grid_size;
 const int grid_height = grid_size;
 
@@ -351,7 +351,7 @@ __global__ void particle_step(Particle* particles, int tick_count) {
     // calculate some variable values to be used later
     const int diameter = ceil_radius * 2;
 
-    const int max_steps = 10;
+    const int max_steps = 20;
     // move at least once
     bool outside_border_margins = true;
     const int border_margins = 250;

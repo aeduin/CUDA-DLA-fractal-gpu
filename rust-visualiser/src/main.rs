@@ -26,11 +26,12 @@ fn main() {
 
     // read values from file into RAM
     println!("reading grid values");
-    for i in 0..grid_size {
-        grid_values[i] = read_i32(&mut file);
-    }
+    // for i in 0..grid_size {
+    //     grid_values[i] = read_i32(&mut file);
+    // }
+    file.read_i32_into::<LittleEndian>(&mut grid_values).unwrap();
 
-    save_as_image(&grid_values, grid_width, grid_height, 1);
+    save_as_image(&grid_values, grid_width, grid_height, 2);
 
     println!("done");
 }
@@ -53,8 +54,8 @@ fn save_as_image(grid_values: &[i32], grid_width: u32, grid_height: u32, reduced
         }
         else {
             // map tick_id to rgb
-            let quotient = 300_000;
-            let base = tick_id + quotient / 10_000;
+            let quotient = 100_000_000;
+            let base = tick_id + quotient / 1_000;
             let r = map_u8(base * 2633 / quotient);
             let g = map_u8(base * 4783 / quotient);
             let b = map_u8(base * 7451 / quotient);
@@ -74,7 +75,7 @@ fn read_i32(file: &mut File) -> i32 {
 
 // returns the biggest one of val1 and val2
 fn max(val1: i32, val2: i32) -> i32 {
-    if(val1 > val2) {
+    if val1 > val2 {
         val1
     }
     else {
@@ -84,9 +85,9 @@ fn max(val1: i32, val2: i32) -> i32 {
 
 // special mapping from i64 to u64
 fn map_u8(val: i64) -> u8 {
-    let modulo = val % 512;
+    let modulo = val % 511;
     
-    if(modulo >= 256) {
+    if modulo >= 255 {
         (512 - modulo) as u8
     }
     else {
