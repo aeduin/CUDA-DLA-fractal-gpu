@@ -88,7 +88,7 @@ fn map_u8(val: i64) -> u8 {
     let modulo = val % 511;
     
     if modulo >= 255 {
-        (512 - modulo) as u8
+        (511 - modulo) as u8
     }
     else {
         modulo as u8
