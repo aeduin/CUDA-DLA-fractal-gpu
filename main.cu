@@ -356,11 +356,17 @@ __global__ void particle_step(Particle* particles, int tick_count) {
     bool outside_border_margins = true;
     const int border_margins = 250;
 
-    for(int i = 0; i < max_steps && outside_border_margins; i++) {
-        particle = move_particle(particle);
-        outside_border_margins = particle.x < (border_left - border_margins) || particle.x > (border_right + border_margins) || particle.y > (border_bottom + border_margins) || particle.y < (border_top - border_margins);
+    if(CIRCLE_BORDER < 0) {
+        for(int i = 0; i < max_steps && outside_border_margins; i++) {
+            particle = move_particle(particle);
+            outside_border_margins = particle.x < (border_left - border_margins) || particle.x > (border_right + border_margins) || particle.y > (border_bottom + border_margins) || particle.y < (border_top - border_margins);
+        }
     }
-    // particle = move_particle(particle);
+    else {
+        // set to false to avoid confusion
+        outside_border_margins = false;
+        particle = move_particle(particle);
+    }
 
     float modulo_x = fmod(particle.x, 1.0f);
     float modulo_y = fmod(particle.y, 1.0f);
