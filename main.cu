@@ -24,7 +24,7 @@ const int ceil_radius = (int)radius + ((((float)(int)radius) < radius) ? 1 : 0);
 const float max_speed = 3.0f;
 const int particle_count = 4096 * 8;
 
-const int grid_size = 1024 / 1;
+const int grid_size = 1024 * 2;
 const int grid_width = grid_size;
 const int grid_height = grid_size;
 
@@ -351,16 +351,16 @@ __global__ void particle_step(Particle* particles, int tick_count) {
     // calculate some variable values to be used later
     const int diameter = ceil_radius * 2;
 
-    const int max_steps = 100;
+    const int max_steps = 10;
     // move at least once
     bool outside_border_margins = true;
-    const int border_margins = 50;
+    const int border_margins = 250;
 
-    // for(int i = 0; i < max_steps && outside_border_margins; i++) {
-    //     particle = move_particle(particle);
-    //     outside_border_margins = particle.x < (border_left - border_margins) || particle.x > (border_right + border_margins) || particle.y > (border_bottom + border_margins) || particle.y < (border_top - border_margins);
-    // }
-    particle = move_particle(particle);
+    for(int i = 0; i < max_steps && outside_border_margins; i++) {
+        particle = move_particle(particle);
+        outside_border_margins = particle.x < (border_left - border_margins) || particle.x > (border_right + border_margins) || particle.y > (border_bottom + border_margins) || particle.y < (border_top - border_margins);
+    }
+    // particle = move_particle(particle);
 
     float modulo_x = fmod(particle.x, 1.0f);
     float modulo_y = fmod(particle.y, 1.0f);
@@ -380,7 +380,8 @@ __global__ void particle_step(Particle* particles, int tick_count) {
                 float distance_x = -dx + modulo_x;
                 float distance_y = -dy + modulo_y;
     
-                if(distance_x * distance_x + distance_y * distance_y < radius * radius) {
+                // if(pythagoras(distance_x, distance_y) < radius * radius && pythagoras(abs(distance_x) + 1, abs(distance_y) + 1) > radius * radius) {
+                if(pythagoras(distance_x, distance_y) < radius * radius) {
                     // position is within radius of the center
                     if(grid[(int)(particle.y - distance_y)][(int)(particle.x - distance_x)] >= 0) {
                         // hit another particle
