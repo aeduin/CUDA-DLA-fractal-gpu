@@ -356,14 +356,9 @@ __global__ void particle_step(Particle* particles, int tick_count) {
     bool outside_border_margins = true;
     const int border_margins = 250;
 
-    float max_x = border_left - border_margins;
-    float min_x = border_right + border_margins;
-    float min_y = border_top - border_margins;
-    float max_y = border_bottom + border_margins;
-
     for(int i = 0; i < max_steps && outside_border_margins; i++) {
         particle = move_particle(particle);
-        outside_border_margins = particle.x < max_x || particle.x > min_x || particle.y < max_y || particle.y > min_y;
+        outside_border_margins = particle.x < (border_left - border_margins) || particle.x > (border_right + border_margins) || particle.y > (border_bottom + border_margins) || particle.y < (border_top - border_margins);
     }
     // particle = move_particle(particle);
 
@@ -386,6 +381,7 @@ __global__ void particle_step(Particle* particles, int tick_count) {
                 float distance_y = -dy + modulo_y;
     
                 // if(pythagoras(distance_x, distance_y) < radius * radius && pythagoras(abs(distance_x) + 1, abs(distance_y) + 1) > radius * radius) {
+
                 if(pythagoras(distance_x, distance_y) < radius * radius) {
                     // position is within radius of the center
                     if(grid[(int)(particle.y - distance_y)][(int)(particle.x - distance_x)] >= 0) {
