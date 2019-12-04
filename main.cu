@@ -21,10 +21,10 @@ using ullong = unsigned long long;
 const float radius = 2.0f;                  // Size of a single particle
 const int ceil_radius = (int)radius + ((((float)(int)radius) < radius) ? 1 : 0);    // Radius rounded up
 const float max_speed = 3.0f;               // Maximum speed a particle can have
-const int particle_count = 4096 * 16;       // The amount of particles simulated at once, should be a multiple of particle_threads_per_block
+const int particle_count = 4096 * 64;       // The amount of particles simulated at once, should be a multiple of particle_threads_per_block
 const int particle_threads_per_block = 16;  // Amount of threads in one thread block when calculating a tick, and when initializing partickles
 
-const int grid_size = 1024 * 2;             // Size of the grid on which the fractal is generated
+const int grid_size = 1024 * 4;             // Size of the grid on which the fractal is generated
 const int grid_width = grid_size;
 const int grid_height = grid_size;
 
@@ -350,9 +350,9 @@ __global__ void particle_step(Particle* particles, int tick_count) {
     int i = blockIdx.x * blockDim.x + threadIdx.x; // particle index in the particles array
     Particle particle = particles[i];
 
-    const int max_steps = 20;
+    const int max_steps = 5;
     bool outside_border_margins = true; // Move at least once
-    const int border_margins = 250;
+    const int border_margins = 150;
 
     if(CIRCLE_BORDER < 0) {
         // Perform at most max_steps when outside the border margins
