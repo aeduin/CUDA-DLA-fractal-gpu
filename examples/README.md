@@ -1,1 +1,1 @@
-![](https://github.com/aeduin/CUDA-DLA-fractal-gpu/blob/master/examples/2048x2048-1.png = 512x512)
+![](https://github.com/aeduin/CUDA-DLA-fractal-gpu/blob/master/examples/2048x2048-1.png =512x512)
