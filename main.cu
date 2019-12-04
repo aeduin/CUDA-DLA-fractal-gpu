@@ -56,12 +56,6 @@ __host__ __device__ float random_float(uint seed);
 #define print(message) std::cout << message << std::endl
 
 int main() {
-    print("debug");
-    for(int i = 0; i < 100; i++) {
-        print(random_float(i));
-    }
-    return 0;
-
     print("starting");
     simulate();
     print("done");
