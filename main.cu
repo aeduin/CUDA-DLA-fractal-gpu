@@ -1,9 +1,10 @@
 #include <iostream>
 #include <math.h>
 #include <fstream>
-#define CIRCLE_BORDER 1000 * 1
+#define CIRCLE_BORDER -1
+//1000 * 1
 
-// #define RANDOM_WALK
+#define RANDOM_WALK
 
 typedef struct {
     float x;
@@ -21,7 +22,7 @@ typedef struct {
 const float radius = 2.0f;
 const int ceil_radius = (int)radius + ((((float)(int)radius) < radius) ? 1 : 0);
 const float max_speed = 3.0f;
-const int particle_count = 4096 * 1;
+const int particle_count = 4096 * 16;
 
 const int grid_size = 1024 * 2;
 const int grid_width = grid_size;
@@ -258,7 +259,7 @@ void simulate() {
             print(debug_copy);
             print(total_static_particles_copy);
         }
-        const int margin = 300;
+        const int margin = 150;
         if(CIRCLE_BORDER > -1 && center_distance < margin * margin) {
             break;
         }
