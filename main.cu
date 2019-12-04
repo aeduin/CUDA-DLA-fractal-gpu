@@ -24,7 +24,7 @@ const float max_speed = 3.0f;               // Maximum speed a particle can have
 const int particle_count = 4096 * 64;       // The amount of particles simulated at once, should be a multiple of particle_threads_per_block
 const int particle_threads_per_block = 16;  // Amount of threads in one thread block when calculating a tick, and when initializing partickles
 
-const int grid_size = 1024 * 4;             // Size of the grid on which the fractal is generated
+const int grid_size = 1024 * 1;             // Size of the grid on which the fractal is generated
 const int grid_width = grid_size;
 const int grid_height = grid_size;
 
