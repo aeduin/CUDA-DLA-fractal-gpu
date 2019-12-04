@@ -1,9 +1,11 @@
 #include <iostream>
 #include <math.h>
 #include <fstream>
-#define CIRCLE_BORDER -1
-//1000 * 1
 
+// Set CIRCLE_BORDER to a negative value to activate normal mode instead
+#define CIRCLE_BORDER -1
+
+// If RANDOM_WALK is defined, the direction of a particle changes every tick
 #define RANDOM_WALK
 
 typedef struct {
@@ -14,37 +16,36 @@ typedef struct {
     uint seed;
 } Particle;
 
-typedef struct {
-    int x;
-    int y;
-} Veci2D;
+using ullong = unsigned long long;
 
-const float radius = 2.0f;
-const int ceil_radius = (int)radius + ((((float)(int)radius) < radius) ? 1 : 0);
-const float max_speed = 3.0f;
-const int particle_count = 4096 * 16;
+const float radius = 2.0f;                  // Size of a single particle
+const int ceil_radius = (int)radius + ((((float)(int)radius) < radius) ? 1 : 0);    // Radius rounded up
+const float max_speed = 3.0f;               // Maximum speed a particle can have
+const int particle_count = 4096 * 16;       // The amount of particles simulated at once, should be a multiple of particle_threads_per_block
+const int particle_threads_per_block = 16;  // Amount of threads in one thread block when calculating a tick, and when initializing partickles
 
-const int grid_size = 1024 * 2;
+const int grid_size = 1024 * 2;             // Size of the grid on which the fractal is generated
 const int grid_width = grid_size;
 const int grid_height = grid_size;
 
-using ullong = unsigned long long;
+__device__ int grid[grid_height][grid_width];   // The grid on which the fractal will be generated
 
-__device__ int grid[grid_height][grid_width];
-__constant__ Veci2D* circle_indices;
-__constant__ int circle_indices_length;
+// Information about the boundaries in which all static particles are
 __device__ int border_left;
 __device__ int border_right;
 __device__ int border_top;
 __device__ int border_bottom;
 __device__ int smallest_distance_to_center;
 
+// Work in progress
 __device__ ullong total_static_particles;
 __device__ ullong weight_center_x;
 __device__ ullong weight_center_y;
 
+// Used in debugging
+const int debug_array_size = 1024;
 __device__ int debug = 0;
-__device__ int debug_array[1024];
+__device__ int debug_array[debug_array_size];
 
 void VecAdd();
 void simulate();
@@ -55,6 +56,9 @@ __host__ __device__ float random_float(uint seed);
 
 #define print(message) std::cout << message << std::endl
 
+/*
+    Entry point: main
+*/
 int main() {
     print("starting");
     simulate();
@@ -80,13 +84,13 @@ void cuda_error() {
     }
 }
 
-// sets the grid values to -1
+// Sets all the grid values to -1 (meaning 'empty' or 'no static particle here')
 __global__ void init_grid_negative() {
     grid[blockIdx.y * blockDim.y + threadIdx.y][blockIdx.x * blockDim.x + threadIdx.x] = -1;
 }
 
-// sets the center of the grid to 0
-__global__ void init_grid_center() {
+// Performs all the initialization that happens only once on the gpu
+__global__ void init_gpu_single() {
     border_top = grid_height / 2;
     border_bottom = grid_height / 2;
     border_left = grid_width / 2;
@@ -94,10 +98,11 @@ __global__ void init_grid_center() {
     smallest_distance_to_center = CIRCLE_BORDER * CIRCLE_BORDER;
 
     if(CIRCLE_BORDER < 0) {
+        // Set the center of the grid to 0 (meaning there is a static particle in the center)
         grid[grid_height / 2][grid_width / 2] = 0;
     }
     else {
-        // init weight center
+        // Init weight center
         int center_bias = 10;
         total_static_particles = center_bias;
         weight_center_x = (grid_width / 2) * center_bias;
@@ -105,45 +110,31 @@ __global__ void init_grid_center() {
     }
 }
 
-// outputs the grid (and its widht/height) to a file
+// Outputs the grid (preceded by its width/height) to a file
 void output_grid() {
-    // get grid from GPU memory
+    // Get grid from GPU memory
     size_t mem_size = sizeof(int) * grid_height * grid_width;
     int* host_grid = (int*)malloc(mem_size);
     cudaMemcpyFromSymbol(host_grid, grid, mem_size, 0, cudaMemcpyDeviceToHost);
 
-    // create file
+    // Create file
     std::ofstream output_file;
     output_file.open("grid_output.bin", std::ios::binary);
     if(output_file.is_open()) {
         print("output_file is open");
     }
 
-    // output to file
-    const int ints[2] = {grid_width, grid_height};
-    output_file.write((const char*) &ints, sizeof(int) * 2);
-    //output_file.write((const char*) &grid_height, sizeof(int));
+    // Output to file
+    const int grid_size[2] = {grid_width, grid_height};
+    output_file.write((const char*) &grid_size, sizeof(int) * 2);
     output_file.write((const char*) host_grid, mem_size);
-
-
-    // std::cout << std::endl << std::endl << "[";
-    // for(int y = 0; y < grid_height; y++) {
-    //     std::cout << "\"";
-    //     for(int x = 0; x < grid_width; x++) {
-    //         int value_at_xy = *(host_grid + x + y * grid_width);
-    //         // std::cout << value_at_xy << ",";
-    //         //std::cout << (value_at_xy >= 0) ? "1" : "0";
-    //         print(value_at_xy);
-    //     } 
-    //     std::cout << "\"," << std::endl;
-    // }
-    // std::cout << "]" << std::endl << std::endl;
     
     // clean up
     output_file.close();
     delete host_grid;
 }
 
+// Returns a pseudorandom number based on the input number x
 __host__ __device__ uint hash(uint x) {
     const uint seed = 1324567967;
     x += seed;
@@ -153,7 +144,7 @@ __host__ __device__ uint hash(uint x) {
     return x;
 }
 
-// returns an int in the range [min, max) based on seed
+// Returns an int in the range [min, max) based on seed
 __host__ __device__ int random_int(int min, int max, uint seed) {
     uint random = hash(seed);
     random %= (uint)(max - min);
@@ -161,14 +152,15 @@ __host__ __device__ int random_int(int min, int max, uint seed) {
     return (int)random + min;
 }
 
-// returns a float in the range [0, 1) based on seed;
+// Returns a float in the range [0, 1) based on seed;
 __host__ __device__ float random_float(uint seed) {
     const int max = 10000000;
     int base = random_int(0, max, seed);
 
-    return fmodf((float)base / (float)max, 1.0);
+    return (float)base / (float)max;
 }
 
+// Randomizes the speed and direction of a particle
 __device__ Particle randomize_speed(Particle particle, int direction_seed, int speed_seed) {
     float direction = M_PI * 2.0f * random_float(direction_seed);
     float speed = random_float(speed_seed) * max_speed;
@@ -179,16 +171,17 @@ __device__ Particle randomize_speed(Particle particle, int direction_seed, int s
     return particle;
 }
 
-// randomizes all fields of the particle
+// Randomizes all fields of the particle
 __device__ Particle randomize_particle(Particle particle) {
     uint seed = particle.seed;
-    int center_width = border_right - border_left;
     int center_height = border_bottom - border_top;
 
     if(CIRCLE_BORDER < 0) {
+        // Place the particle outside the borders
         particle.x = random_int(0, grid_width, seed + 0);
 
         if(particle.x > border_left && particle.x < border_right) {
+            // Generate a y-coordiante that does not overlap with the borders
             particle.y = random_int(0, grid_height - center_height, seed + 1);
 
             if(particle.y > border_top) {
@@ -202,19 +195,19 @@ __device__ Particle randomize_particle(Particle particle) {
     else {
         particle.x = (float) (grid_width - (weight_center_x / total_static_particles));
         particle.y = (float) (grid_height - (weight_center_y / total_static_particles));
-        // particle.x = grid_width / 2;
-        // particle.y = grid_height / 2;
-        // debug = (int) particle.x;
     }
 
+    #ifndef RANDOM_WALK
+    // When doing a random walk, the speed is randomized at the beginning of each tick anyways
     particle = randomize_speed(particle, seed + 2, seed + 3);
+    #endif
 
     particle.seed = hash(seed);
 
     return particle;
 }
 
-// initializes the particle
+// Initializes the particle
 __global__ void init_particles(Particle* particles) {
     int i = threadIdx.x + blockIdx.x * blockDim.x; // particle index in the particles array
     Particle* particle = particles + i;
@@ -222,7 +215,7 @@ __global__ void init_particles(Particle* particles) {
     *particle = randomize_particle(*particle);
 }
 
-// prints border_left, border_right, border_top and border_bottom to stdio
+// Prints border_left, border_right, border_top and border_bottom to stdio
 void print_boundaries() {
     int left, right, top, bottom;
 
@@ -233,38 +226,41 @@ void print_boundaries() {
     print(left << ", " << right << ", " << top << ", " << bottom);
 }
 
+// Creates the fractal
 void simulate() {
-    // initialize grid
-
+    // Make sure there are no errors at the start of the simulation
     cuda_error();
 
+    // Initialize grid
     dim3 threadsPerBlock(16, 16);
     dim3 blocks(grid_width / threadsPerBlock.x, grid_height / threadsPerBlock.y);
     init_grid_negative<<<blocks, threadsPerBlock>>>();
-    init_grid_center<<<1, 1>>>();
+    init_gpu_single<<<1, 1>>>();
 
-    // initialize particles
+    // Initialize particles
     size_t mem_size = particle_count * sizeof(Particle);
     Particle* particles;
     cudaMalloc(&particles, mem_size);
-    const int particle_threads_per_block = 256;
     const int particle_blocks = particle_count / particle_threads_per_block;
 
     cuda_error();
     init_particles<<<particle_blocks, particle_threads_per_block>>>(particles);
-    // done intializing particles
+    // Done intializing particles
 
+    // Print some debug information, I left this in since it safed me some confusion a few times
     print_boundaries();
     cuda_error();
 
+    // Perform simulation ticks, until a particle hits the margins
     int tick_count = 0;
     for(int i = 0; true; i++) {
+        // Perform one tick
         tick(particles, ++tick_count);
 
-      
+        // Debug information
         int left, right, top, bottom, center_distance;
         int debug_copy;
-        int debug_array_copy[1024];
+        int debug_array_copy[debug_array_size];
         ullong total_static_particles_copy;
 
         cudaMemcpyFromSymbol(&left, border_left, sizeof(int));
@@ -290,6 +286,8 @@ void simulate() {
                 print(debug_array_copy[i]);
             }
         }
+
+        // Check if a particle has come to close to the margins, and if it did, finish the simulation
         const int margin = 150;
         if(CIRCLE_BORDER > -1 && center_distance < margin * margin) {
             break;
@@ -298,6 +296,8 @@ void simulate() {
             break;
         }
     }
+
+    // Finish up
     cuda_error();
     output_grid();
 
@@ -345,19 +345,17 @@ __device__ Particle move_particle(Particle particle) {
     return particle;
 }
 
+// Performs one step of one particle
 __global__ void particle_step(Particle* particles, int tick_count) {
     int i = blockIdx.x * blockDim.x + threadIdx.x; // particle index in the particles array
     Particle particle = particles[i];
 
-    // calculate some variable values to be used later
-    const int diameter = ceil_radius * 2;
-
     const int max_steps = 20;
-    // move at least once
-    bool outside_border_margins = true;
+    bool outside_border_margins = true; // Move at least once
     const int border_margins = 250;
 
     if(CIRCLE_BORDER < 0) {
+        // Perform at most max_steps when outside the border margins
         for(int i = 0; i < max_steps && outside_border_margins; i++) {
             particle = move_particle(particle);
             outside_border_margins = particle.x < (border_left - border_margins) || particle.x > (border_right + border_margins) || particle.y > (border_bottom + border_margins) || particle.y < (border_top - border_margins);
@@ -372,27 +370,27 @@ __global__ void particle_step(Particle* particles, int tick_count) {
     float modulo_x = fmod(particle.x, 1.0f);
     float modulo_y = fmod(particle.y, 1.0f);
 
+    // If the particle is outside the circle border, turn it static
     if(CIRCLE_BORDER > -1 && (int)(pythagoras(particle) + radius) >= CIRCLE_BORDER * CIRCLE_BORDER) {
         particles[i] = make_static(particle, tick_count, modulo_x, modulo_y);
         return;
     }
 
-    // if(true) {
     if(!outside_border_margins) {
+        // Check for collision with static particles
         bool looping = true;
         
         for(int dx = -ceil_radius; dx <= ceil_radius && looping; dx++) {
             for(int dy = -ceil_radius; dy <= ceil_radius && looping; dy++) {
-                // calculate distance from center of the particle
+                // Calculate distance from center of the particle
                 float distance_x = -dx + modulo_x;
                 float distance_y = -dy + modulo_y;
-    
-                // if(pythagoras(distance_x, distance_y) < radius * radius && pythagoras(abs(distance_x) + 1, abs(distance_y) + 1) > radius * radius) {
 
                 if(pythagoras(distance_x, distance_y) < radius * radius) {
-                    // position is within distance of the center
+                    // Position is within distance of the center
+                    
                     if(grid[(int)(particle.y - distance_y)][(int)(particle.x - distance_x)] >= 0) {
-                        // it hit another particle
+                        // It hit another particle, so turn this one static too
                         particle = make_static(particle, tick_count, modulo_x, modulo_y);
     
                         looping = false;
@@ -403,24 +401,27 @@ __global__ void particle_step(Particle* particles, int tick_count) {
         }
     }
 
+    // Update value in particles array
     particles[i] = particle;
 }
 
+// Creates a static particle in the grid on this location, and replaces the live particle by a new one
 __device__ Particle make_static(Particle particle, int tick_count, float modulo_x, float modulo_y) {
-    for(int dx2 = -ceil_radius; dx2 <= ceil_radius; dx2++) {
-        for(int dy2 = -ceil_radius; dy2 <= ceil_radius; dy2++) {
-            // calculate distance from center of the particle
-            float distance_x2 = -dx2 + modulo_x;
-            float distance_y2 = -dy2 + modulo_y;
+    // Create new static particle
+    for(int dx = -ceil_radius; dx <= ceil_radius; dx++) {
+        for(int dy = -ceil_radius; dy <= ceil_radius; dy++) {
+            // Calculate distance from center of the particle
+            float distance_x = -dx + modulo_x;
+            float distance_y = -dy + modulo_y;
 
-            if(distance_x2 * distance_x2 + distance_y2 * distance_y2 < radius * radius) {
-                // calculate position in grid
-                int absolute_x = (int)(particle.x - distance_x2);
-                int absolute_y = (int)(particle.y - distance_y2);
+            if(distance_x * distance_x + distance_y * distance_y < radius * radius) {
+                // Calculate position in grid
+                int absolute_x = (int)(particle.x - distance_x);
+                int absolute_y = (int)(particle.y - distance_y);
                 
-                // if the absolute_x/y are within the grid
+                // If the absolute_x/y are within the grid
                 if(absolute_x >= 0 && absolute_x < grid_width && absolute_y >= 0 && absolute_y < grid_height) {
-                    // set the grid to being hit
+                    // Set the grid to being hit
                     grid[absolute_y][absolute_x] = tick_count;
 
                     /*
@@ -433,6 +434,7 @@ __device__ Particle make_static(Particle particle, int tick_count, float modulo_
         }
     }
 
+    // Update information about the boundaries that contain all particles
     if(CIRCLE_BORDER < 0) {
         atomicMin(&border_left, (int)(particle.x - radius));
         atomicMax(&border_right, (int)(particle.x + radius));
@@ -446,14 +448,13 @@ __device__ Particle make_static(Particle particle, int tick_count, float modulo_
         atomicAdd(&weight_center_y, (ullong)particle.y);
     }
 
-    // give the particle a random new position and speed
+    // Give the particle a random new position and speed
     return randomize_particle(particle);
 }
 
-// perform one tick
+// Performs one tick
 void tick(Particle* particles, int tick_count) {
-    const int threads_per_block = 16;
-    const int blocks = particle_count / threads_per_block;
+    const int blocks = particle_count / particle_threads_per_block;
 
-    particle_step<<<blocks, threads_per_block>>>(particles, tick_count);
+    particle_step<<<blocks, particle_threads_per_block>>>(particles, tick_count);
 }
