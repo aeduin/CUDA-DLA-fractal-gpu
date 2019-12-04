@@ -1,6 +1,8 @@
 # CUDA-DLA-fractal-gpu
 Implementation of the diffusion limited aggregation fractal with CUDA C++
 
+![](./examples/2048x2048-1.png)
+
 # Building and Running
 ## Prerequisits
 This project depends on:
