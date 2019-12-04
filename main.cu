@@ -22,9 +22,9 @@ typedef struct {
 const float radius = 2.0f;
 const int ceil_radius = (int)radius + ((((float)(int)radius) < radius) ? 1 : 0);
 const float max_speed = 3.0f;
-const int particle_count = 4096 * 16;
+const int particle_count = 4096 * 8;
 
-const int grid_size = 1024 * 16;
+const int grid_size = 1024 * 2;
 const int grid_width = grid_size;
 const int grid_height = grid_size;
 
@@ -49,12 +49,19 @@ __device__ int debug_array[1024];
 void VecAdd();
 void simulate();
 void tick(Particle* particles, int tick_count);
-__device__ int random_int(int min, int max, uint seed);
+__host__ __device__ int random_int(int min, int max, uint seed);
 __device__ Particle make_static(Particle particle, int tick_count, float modulo_x, float modulo_y);
+__host__ __device__ float random_float(uint seed);
 
 #define print(message) std::cout << message << std::endl
 
 int main() {
+    print("debug");
+    for(int i = 0; i < 100; i++) {
+        print(random_float(i));
+    }
+    return 0;
+
     print("starting");
     simulate();
     print("done");
@@ -143,7 +150,7 @@ void output_grid() {
     delete host_grid;
 }
 
-__device__ uint hash(uint x) {
+__host__ __device__ uint hash(uint x) {
     const uint seed = 1324567967;
     x += seed;
     x = ((x >> 16) ^ x) * seed;
@@ -153,23 +160,23 @@ __device__ uint hash(uint x) {
 }
 
 // returns an int in the range [min, max) based on seed
-__device__ int random_int(int min, int max, uint seed) {
+__host__ __device__ int random_int(int min, int max, uint seed) {
     uint random = hash(seed);
-    random %= max - min;
+    random %= (uint)(max - min);
     
     return (int)random + min;
 }
 
 // returns a float in the range [0, 1) based on seed;
-__device__ float random_float(uint seed) {
+__host__ __device__ float random_float(uint seed) {
     const int max = 10000000;
     int base = random_int(0, max, seed);
 
-    return (float)base / (float)max;
+    return fmodf((float)base / (float)max, 1.0);
 }
 
 __device__ Particle randomize_speed(Particle particle, int direction_seed, int speed_seed) {
-    float direction = M_PI * 2000.0f * random_float(direction_seed);
+    float direction = M_PI * 2.0f * random_float(direction_seed);
     float speed = random_float(speed_seed) * max_speed;
 
     particle.vertical_speed = cosf(direction) * speed;
@@ -351,7 +358,7 @@ __global__ void particle_step(Particle* particles, int tick_count) {
     // calculate some variable values to be used later
     const int diameter = ceil_radius * 2;
 
-    const int max_steps = 20;
+    const int max_steps = 1;
     // move at least once
     bool outside_border_margins = true;
     const int border_margins = 250;
@@ -376,8 +383,8 @@ __global__ void particle_step(Particle* particles, int tick_count) {
         return;
     }
 
-    if(true) {
-    // if(!outside_border_margins) {
+    // if(true) {
+    if(!outside_border_margins) {
         bool looping = true;
         
         for(int dx = -ceil_radius; dx <= ceil_radius && looping; dx++) {
@@ -389,9 +396,9 @@ __global__ void particle_step(Particle* particles, int tick_count) {
                 // if(pythagoras(distance_x, distance_y) < radius * radius && pythagoras(abs(distance_x) + 1, abs(distance_y) + 1) > radius * radius) {
 
                 if(pythagoras(distance_x, distance_y) < radius * radius) {
-                    // position is within radius of the center
+                    // position is within distance of the center
                     if(grid[(int)(particle.y - distance_y)][(int)(particle.x - distance_x)] >= 0) {
-                        // hit another particle
+                        // it hit another particle
                         particle = make_static(particle, tick_count, modulo_x, modulo_y);
     
                         looping = false;
@@ -406,11 +413,6 @@ __global__ void particle_step(Particle* particles, int tick_count) {
 }
 
 __device__ Particle make_static(Particle particle, int tick_count, float modulo_x, float modulo_y) {
-    // debug = sqrt(pythagoras(particle) - radius);
-    // int next_index = atomicAdd(&debug, 2);
-    // debug_array[next_index] = particle.x;
-    // debug_array[next_index] = particle.y;
-
     for(int dx2 = -ceil_radius; dx2 <= ceil_radius; dx2++) {
         for(int dy2 = -ceil_radius; dy2 <= ceil_radius; dy2++) {
             // calculate distance from center of the particle
@@ -421,16 +423,11 @@ __device__ Particle make_static(Particle particle, int tick_count, float modulo_
                 // calculate position in grid
                 int absolute_x = (int)(particle.x - distance_x2);
                 int absolute_y = (int)(particle.y - distance_y2);
-                // debug = absolute_y;
-    
+                
                 // if the absolute_x/y are within the grid
                 if(absolute_x >= 0 && absolute_x < grid_width && absolute_y >= 0 && absolute_y < grid_height) {
                     // set the grid to being hit
                     grid[absolute_y][absolute_x] = tick_count;
-    
-                    // int next_index = atomicAdd(&debug, 2);
-                    // debug_array[next_index] = absolute_x;
-                    // debug_array[next_index] = absolute_y;
 
                     /*
                         Because the program writes and reads from the same grid in a single tick,

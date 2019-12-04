@@ -31,7 +31,7 @@ fn main() {
     // }
     file.read_i32_into::<LittleEndian>(&mut grid_values).unwrap();
 
-    save_as_image(&grid_values, grid_width, grid_height, 2);
+    save_as_image(&grid_values, grid_width, grid_height, 1);
 
     println!("done");
 }
@@ -54,7 +54,7 @@ fn save_as_image(grid_values: &[i32], grid_width: u32, grid_height: u32, reduced
         }
         else {
             // map tick_id to rgb
-            let quotient = 100_000_000;
+            let quotient = 100_000;
             let base = tick_id + quotient / 1_000;
             let r = map_u8(base * 2633 / quotient);
             let g = map_u8(base * 4783 / quotient);
