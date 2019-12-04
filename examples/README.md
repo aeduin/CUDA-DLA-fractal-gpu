@@ -1,1 +1,2 @@
-![](https://github.com/aeduin/CUDA-DLA-fractal-gpu/blob/master/examples/2048x2048-1.png)
+![](./2048x2048-1.png)
+![](./4069x4096-1.png)
